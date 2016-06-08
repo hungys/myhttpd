@@ -31,4 +31,4 @@ $ ./myhttpd 8080 "/Users/hungys/wwwroot"
 
 # Knwon issues
 
-On Mac OS X, there are **random** memory allocation or string-related issues, and We're still investigating the root cause. We were not aware of these issues on Ubuntu/Linux so far.
+On Mac OS X, there are **random** memory allocation or string-related issues, and we're still investigating the root cause. We were not aware of these issues on Ubuntu/Linux so far.
