@@ -26,6 +26,30 @@ using namespace std;
 
 const string DEFAULT_PAGES[4] = {"index.html", "index.htm", "default.html", "default.htm"};
 
+const char HEX2DEC[256] =
+{
+    /*       0  1  2  3   4  5  6  7   8  9  A  B   C  D  E  F */
+    /* 0 */ -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1,
+    /* 1 */ -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1,
+    /* 2 */ -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1,
+    /* 3 */  0, 1, 2, 3,  4, 5, 6, 7,  8, 9,-1,-1, -1,-1,-1,-1,
+
+    /* 4 */ -1,10,11,12, 13,14,15,-1, -1,-1,-1,-1, -1,-1,-1,-1,
+    /* 5 */ -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1,
+    /* 6 */ -1,10,11,12, 13,14,15,-1, -1,-1,-1,-1, -1,-1,-1,-1,
+    /* 7 */ -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1,
+
+    /* 8 */ -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1,
+    /* 9 */ -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1,
+    /* A */ -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1,
+    /* B */ -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1,
+
+    /* C */ -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1,
+    /* D */ -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1,
+    /* E */ -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1,
+    /* F */ -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1, -1,-1,-1,-1
+};
+
 const char http_error_403_page[] =
 "<html>" CRLF
 "<head><title>403 Forbidden</title></head>" CRLF
@@ -51,17 +75,20 @@ const char directory_output_template[] =
 "<html>" CRLF
 "<head>" CRLF
 "<meta http-equiv=\"content-type\" content=\"text/html; charset=utf-8\"/>" CRLF
-"<title>{{path}}</title>" CRLF
+"<title>{{title}}</title>" CRLF
 "<style>" CRLF
-"body {" CRLF
+"p {" CRLF
 "    font-family: monospace;" CRLF
 "    white-space: pre;" CRLF
 "}" CRLF
 "</style>" CRLF
 "</head>" CRLF
-"<body>" CRLF
+"<body bgcolor=\"white\">" CRLF
+"<h1>Index of {{path}}</h1>" CRLF
 "<hr/>" CRLF
+"<p>" CRLF
 "{{list}}" CRLF
+"</p>" CRLF
 "<hr/>" CRLF
 "</body>" CRLF
 "</html>" CRLF
@@ -81,7 +108,7 @@ public:
 
     static bool FileExist(string path) {
         struct stat st;
-        int res = stat(path.c_str(), &st);
+        int res = lstat(path.c_str(), &st);
         return res == 0;
     }
 
@@ -130,6 +157,48 @@ public:
 
         pclose(pipe);
         return result;
+    }
+
+    static string UriDecode(const string &sSrc)
+    {
+        // Source: http://www.codeguru.com/cpp/cpp/algorithms/strings/article.php/c12759/URI-Encoding-and-Decoding.htm
+        // Note from RFC1630: "Sequences which start with a percent
+        // sign but are not followed by two hexadecimal characters
+        // (0-9, A-F) are reserved for future extension"
+
+        const unsigned char * pSrc = (const unsigned char *)sSrc.c_str();
+        const int SRC_LEN = sSrc.length();
+        const unsigned char * const SRC_END = pSrc + SRC_LEN;
+        // last decodable '%'
+        const unsigned char * const SRC_LAST_DEC = SRC_END - 2;
+
+        char * const pStart = new char[SRC_LEN];
+        char * pEnd = pStart;
+
+        while (pSrc < SRC_LAST_DEC)
+        {
+          if (*pSrc == '%')
+          {
+             char dec1, dec2;
+             if (-1 != (dec1 = HEX2DEC[*(pSrc + 1)])
+                && -1 != (dec2 = HEX2DEC[*(pSrc + 2)]))
+             {
+                *pEnd++ = (dec1 << 4) + dec2;
+                pSrc += 3;
+                continue;
+             }
+          }
+
+          *pEnd++ = *pSrc++;
+        }
+
+        // the last 2- chars
+        while (pSrc < SRC_END)
+          *pEnd++ = *pSrc++;
+
+        string sResult(pStart, pEnd);
+        delete [] pStart;
+        return sResult;
     }
 };
 
@@ -416,10 +485,10 @@ private:
 
         size_t question_pos = token.find_first_of("?");
         if (question_pos != string::npos) {
-            request->path = token.substr(0, question_pos);
+            request->path = Util::UriDecode(token.substr(0, question_pos));
             request->query_string = token.substr(question_pos + 1);
         } else {
-            request->path = token;
+            request->path = Util::UriDecode(token);
             request->query_string = "";
         }
     }
@@ -529,17 +598,30 @@ private:
         string list = Util::Exec("ls -al " + path);
         list.erase(0, list.find("\n") + 1);
         string list_withlink = "";
+        size_t spcae_pos = string::npos;
 
         stringstream ss(list);
         string line;
         while (getline(ss, line)) {
             Util::TrimEnd(line);
-            size_t spcae_pos = line.find_last_of(" ");
-            string filename = line.substr(spcae_pos + 1);
+
+            if (spcae_pos == string::npos) {
+                spcae_pos = line.find_last_of(" ");
+            }
+
+            size_t arrow_pos = line.find("->");
+            string filename = "";
+            if (arrow_pos != string::npos) {
+                filename = line.substr(spcae_pos + 1, arrow_pos - spcae_pos - 2);
+            } else {
+                filename = line.substr(spcae_pos + 1);
+            }
+
             line.replace(spcae_pos + 1, filename.length(), "<a href=\"" + filename + "\">" + filename + "</a>");
             list_withlink = list_withlink + line + CRLF;
         }
 
+        output.replace(output.find("{{title}}"), 9, path);
         output.replace(output.find("{{path}}"), 8, path);
         output.replace(output.find("{{list}}"), 8, list_withlink);
         return output;
@@ -632,12 +714,12 @@ private:
         string path = HttpUtil::GetAbsolutePath(request->path);
 
         if (!Util::FileExist(path)) {
-            response->SendSpecialResponse(403);
+            response->SendSpecialResponse(404);
             return;
         }
 
         if (!Util::IsFileAccessible(path)) {
-            response->SendSpecialResponse(404);
+            response->SendSpecialResponse(403);
             return;
         }
 

@@ -1,5 +1,12 @@
+UNAME := $(shell uname)
 CC = g++
-CFLAGS = -std=c++11 -Wall
+
+ifeq ($(UNAME), Darwin)
+	CFLAGS = -stdlib=libc++ -std=c++11 -Wall
+else
+	CFLAGS = -std=c++11 -Wall
+endif
+
 
 hw4: myhttpd.o
 	$(CC) myhttpd.o -o myhttpd
